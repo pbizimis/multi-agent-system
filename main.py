@@ -248,8 +248,9 @@ for idx, config in enumerate(all_configs):
 
     num_samples_per_task = 1
     samples = [
-        dict(task_id=task_id, completion=config.run(problems[task_id]["prompt"]))
+        dict(task_id=task_id, completion=config.run(
+            problems[task_id]["prompt"]))
         for task_id in problems
         for _ in range(num_samples_per_task)
     ]
-    write_jsonl("samples.jsonl", samples)
+    write_jsonl("config" + str(idx + 1) + ".jsonl", samples)
