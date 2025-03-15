@@ -1,10 +1,11 @@
+import json
+from human_eval.data import write_jsonl, read_problems
 from openai import OpenAI
 from agent import Agent
 from generator import GeneratorInput, GeneratorOutput, generator_prompt
 from critic import CriticInput, CriticOutput, critic_prompt
 from planner import PlannerInput, PlannerOutput, planner_prompt
 from debugger import DebuggerInput, DebuggerOutput, debugger_prompt
-import json
 
 
 class MAS:
@@ -12,6 +13,8 @@ class MAS:
         self.agents = {}
         self.first_agent = None
         self.client = OpenAI()
+        self.counter = 0
+        self.feedback_counter = []
 
     def add_agent(self, id, model, prompt, next_agent, output_format, input_format):
         agent = Agent(
@@ -21,6 +24,10 @@ class MAS:
         return agent
 
     def run(self, message):
+
+        self.counter += 1
+        print("PROBLEM", self.counter)
+
         if self.first_agent is None:
             return print("Please set an entry agent")
 
@@ -33,27 +40,32 @@ class MAS:
         }
 
         agent = self.agents[self.first_agent]
+        counter = 0
         while True:
+
+            if agent.id == "coder":
+                counter += 1
 
             complete_prompt = ""
 
             for field in agent.input_format.model_fields.keys():
-                complete_prompt += f"{field}:\n{data[field]}\n\n"
-
-            print("\n")
-            print("Calling Agent", agent.id)
-            print("Input prompt: \n", complete_prompt)
+                if field == "prompt":
+                    complete_prompt += f"This is the ground truth prompt. This is what asked of you. Make sure that any output code matches the function and parameter names defined here:\n{
+                        data[field]}\n\n"
+                elif field == "code":
+                    if data["code"]:
+                        complete_prompt += f"This is the currently generated code. It might be wrong. Please compare the function and parameter names to the function above in the ground truth prompt:\n{
+                            data[field]}\n\n"
+                elif data[field]:
+                    complete_prompt += f"{field}:\n{data[field]}\n\n"
 
             resp = agent.request(message)
             resp_data = json.loads(resp)
-            print("Output: \n", resp_data)
             for k in resp_data.keys():
                 data[k] = resp_data[k]
 
-            print("\n")
-            print("MAS data: \n", data)
-
-            if agent.next_agent is None or data["feedback"] == "DONE":
+            if agent.next_agent is None or "NO" in data["feedback"]:
+                self.feedback_counter.append(counter)
                 return data["code"]
 
             message = resp
@@ -64,7 +76,6 @@ class MAS:
 
 
 def create_PGC():
-    print("Initialize Planner, Generator, Critic Multi-Agent-System")
     mas = MAS()
 
     mas.add_agent(
@@ -77,21 +88,21 @@ def create_PGC():
     )
 
     mas.add_agent(
-        "critic",
-        "o3-mini-2025-01-31",
-        critic_prompt,
-        "coder",
-        CriticOutput,
-        CriticInput,
-    )
-
-    mas.add_agent(
         "coder",
         "o3-mini-2025-01-31",
         generator_prompt,
         "critic",
         GeneratorOutput,
         GeneratorInput,
+    )
+
+    mas.add_agent(
+        "critic",
+        "o3-mini-2025-01-31",
+        critic_prompt,
+        "planner",
+        CriticOutput,
+        CriticInput,
     )
 
     mas.first_agent = "planner"
@@ -100,17 +111,7 @@ def create_PGC():
 
 
 def create_GC():
-    print("Initialize Generator, Critic Multi-Agent-System")
     mas = MAS()
-
-    mas.add_agent(
-        "critic",
-        "o3-mini-2025-01-31",
-        critic_prompt,
-        "coder",
-        CriticOutput,
-        CriticInput,
-    )
 
     mas.add_agent(
         "coder",
@@ -121,13 +122,21 @@ def create_GC():
         GeneratorInput,
     )
 
+    mas.add_agent(
+        "critic",
+        "o3-mini-2025-01-31",
+        critic_prompt,
+        "coder",
+        CriticOutput,
+        CriticInput,
+    )
+
     mas.first_agent = "coder"
 
     return mas
 
 
-def create_PGDC():
-    print("Initialize Planner, Generator, Debugger, Critic Multi-Agent-System")
+def create_PGCD():
     mas = MAS()
 
     mas.add_agent(
@@ -137,15 +146,6 @@ def create_PGDC():
         "coder",
         PlannerOutput,
         PlannerInput,
-    )
-
-    mas.add_agent(
-        "critic",
-        "o3-mini-2025-01-31",
-        critic_prompt,
-        "coder",
-        CriticOutput,
-        CriticInput,
     )
 
     mas.add_agent(
@@ -166,14 +166,90 @@ def create_PGDC():
         DebuggerInput,
     )
 
+    mas.add_agent(
+        "critic",
+        "o3-mini-2025-01-31",
+        critic_prompt,
+        "planner",
+        CriticOutput,
+        CriticInput,
+    )
+
     mas.first_agent = "planner"
 
     return mas
 
 
-p = """
-    from typing import List\n\n\ndef has_close_elements(numbers: List[float], threshold: float) -> bool:\n    \"\"\" Check if in given list of numbers, are any two numbers closer to each other than\n    given threshold.\n    >>> has_close_elements([1.0, 2.0, 3.0], 0.5)\n    False\n    >>> has_close_elements([1.0, 2.8, 3.0, 4.0, 5.0, 2.0], 0.3)\n    True\n    \"\"\"\n
-    """
+def create_GCD():
+    mas = MAS()
 
-GC = create_PGC()
-print(GC.run(p))
+    mas.add_agent(
+        "coder",
+        "o3-mini-2025-01-31",
+        generator_prompt,
+        "debugger",
+        GeneratorOutput,
+        GeneratorInput,
+    )
+
+    mas.add_agent(
+        "debugger",
+        "o3-mini-2025-01-31",
+        debugger_prompt,
+        "critic",
+        DebuggerOutput,
+        DebuggerInput,
+    )
+
+    mas.add_agent(
+        "critic",
+        "o3-mini-2025-01-31",
+        critic_prompt,
+        "coder",
+        CriticOutput,
+        CriticInput,
+    )
+
+    mas.first_agent = "coder"
+
+    return mas
+
+
+def create_G():
+    mas = MAS()
+
+    mas.add_agent(
+        "coder",
+        "o3-mini-2025-01-31",
+        generator_prompt,
+        None,
+        GeneratorOutput,
+        GeneratorInput,
+    )
+    mas.first_agent = "coder"
+
+    return mas
+
+
+G = create_G()
+GC = create_GC()
+PGC = create_PGC()
+GCD = create_PGCD()
+PGCD = create_PGCD()
+all_configs = [G, GC, PGC, GCD, PGCD]
+
+print("All configurations created!")
+
+print("RUNNING THE BENCHMARK CAN RESULT IN HIGH OPENAI API COSTS!")
+
+for idx, config in enumerate(all_configs):
+    print("Running config " + str(idx + 1) + "/" + str(len(all_configs)))
+    problems = read_problems()
+
+    num_samples_per_task = 1
+    samples = [
+        dict(task_id=task_id, completion=config.run(problems[task_id]["prompt"]))
+        for task_id in problems
+        for _ in range(num_samples_per_task)
+    ]
+    write_jsonl("samples.jsonl", samples)

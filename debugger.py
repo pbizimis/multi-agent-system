@@ -5,8 +5,11 @@ from agent import Agent
 class DebuggerOutput(BaseModel):
     feedback: str
 
+
 class DebuggerInput(BaseModel):
+    prompt: str
     code: str
+
 
 class DebuggerAgent(Agent):
     def __init__(self):
@@ -39,15 +42,12 @@ class DebuggerAgent(Agent):
         )
 
         if run.status == "completed":
-            messages = self.client.beta.threads.messages.list(
-                thread_id=self.thread.id)
+            messages = self.client.beta.threads.messages.list(thread_id=self.thread.id)
             print(messages)
         else:
             print(run.status)
 
 
 debugger_prompt = """
-You are a code executor. You will receive two things: code and testcases. You should run the code and assert the output
-of the code to the test cases that are given to you. If they match, just respond with success, if they don't match, respond
-with the mismatch.
+You are a code executor. You will receive code and a prompt. The prompt function is the ground truth and you should generate test cases based on the requirements defined there. You should run the code and assert the output of the code to the test cases. If they match, just respond with 'CODE WORKS CORRECTLY', if they don't match, respond with the mismatch.
 """
